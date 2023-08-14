@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 
-FROM alpine:3.16 as build-environment
+FROM alpine:3.17 as build-environment
 
 ARG TARGETARCH
 WORKDIR /opt
@@ -27,14 +27,33 @@ RUN --mount=type=cache,target=/root/.cargo/registry --mount=type=cache,target=/r
     && strip out/chisel \
     && strip out/anvil;
 
-FROM docker.io/frolvlad/alpine-glibc:alpine-3.16_glibc-2.34 as foundry-client
+FROM alpine:3.17 as foundry-client
+ARG TARGETARCH
+ARG FOUNDRY_SOLC_VERSION=0.8.17
 
-RUN apk add --no-cache linux-headers git
+RUN apk add --no-cache linux-headers git libstdc++ libgcc wget
 
 COPY --from=build-environment /opt/foundry/out/forge /usr/local/bin/forge
 COPY --from=build-environment /opt/foundry/out/cast /usr/local/bin/cast
 COPY --from=build-environment /opt/foundry/out/anvil /usr/local/bin/anvil
 COPY --from=build-environment /opt/foundry/out/chisel /usr/local/bin/chisel
+
+RUN \
+	apk --no-cache --update add build-base cmake musl-dev curl-dev g++ gcc boost-dev z3-dev z3 boost-static git bash \
+	&& wget https://github.com/ethereum/solidity/releases/download/v${FOUNDRY_SOLC_VERSION}/solidity_${FOUNDRY_SOLC_VERSION}.tar.gz \
+	&& tar xvzf solidity_${FOUNDRY_SOLC_VERSION}.tar.gz \
+	&& ( \
+		cd /solidity_${FOUNDRY_SOLC_VERSION} \
+		&& mkdir build \
+		&& cd build \
+		&& cmake -DSTRICT_Z3_VERSION=OFF .. \
+		&& make -j4 solc \
+		&& mkdir -p /root/.svm/${FOUNDRY_SOLC_VERSION}/ \
+		&& mv solc/solc /root/.svm/${FOUNDRY_SOLC_VERSION}/solc-${FOUNDRY_SOLC_VERSION} \
+	) \
+	&& rm -rf /var/cache/apk/* \
+	&& rm -rf solidity_*
+
 
 RUN adduser -Du 1000 foundry
 
